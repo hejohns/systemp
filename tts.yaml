@@ -11,15 +11,16 @@ Xvfb:
   - "@done"
 evince:
   - "@arg 0 $pdf"
-  - "@& evince $pdf"
+  - "@&& evince $pdf"
   - "@done"
 gvim:
   - "@arg 0 $text_file"
-  - "@& gvim $text_file"
+  - "gvim $text_file" # -f
   - "@done"
 xdotool:
   - "@wait Xvfb"
   - "@wait evince"
   - "@wait gvim"
   - xdotool search evince
-  - xdotool windowfocus
+  - xdotool search gvim
+  - xdotool windowfocus 2097153

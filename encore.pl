@@ -24,7 +24,7 @@ use diagnostics -verbose;
     use Capture::Tiny qw(:all);
     # for more complicated stuff
     # eg timeout, redirection
-    use IPC::Run qw(start pump finish);
+    use IPC::Run qw(run start pump finish);
     use IPC::Cmd qw(can_run);
 # option/arg handling
     use Getopt::Long qw(:config gnu_getopt auto_version); # auto_help not the greatest
@@ -48,6 +48,10 @@ use IPC::Semaphore;
 # semaphores
 our %sem;
 
+#$SIG{'TERM'} = sub {
+#    exit 1;
+#};
+
 sub subst($env, @xs){
     @xs = grep defined, @xs;
     return map {
@@ -56,7 +60,6 @@ sub subst($env, @xs){
 }
 sub proc_eval($proc, $args, @program){
     my @args = grep defined, @$args;
-    say "$proc: @args";
     my %env;
     my @bg_jobs;
     # a proc should be a list of commands
@@ -66,6 +69,7 @@ sub proc_eval($proc, $args, @program){
             next;
         }
         s/\$(\S+)/$env{$1}/;
+        say STDERR "[$proc] " . join ' ', split ' ';
         if(m/^\@wait\s+(\S+)$/){
             say "$proc: FOO";
             $sem{$1}->op(0, -1, 0);
@@ -75,21 +79,38 @@ sub proc_eval($proc, $args, @program){
             $sem{$proc}->op(0, 1, 0);
         }
         elsif(m/^\@&/){
-            say STDERR split '';
+            my @cmd = split ' ';
+            shift @cmd;
             my $in;
             my $out;
-            #my $harness = start [split ' '], \$in, \$out:
-            #pump $harness until length $out;
-            #push @bg_jobs, $harness;
-            #finish $harness or croak "Uh oh. $!";
+            my $harness = start \@cmd, \$in, \$out;
+            if(m/^\@&&/){
+                my $stdout;
+                do{
+                    $stdout = capture_stdout {
+                        run ['xdotool', 'search', 'evince']
+                    };
+                    sleep(1);
+                } while(!length $stdout);
+            }
+            push @bg_jobs, $harness;
         }
         else{
-            say STDERR split '';
-            #run [split ' '];
+            my $stdout = capture_stdout {
+                run [split ' '];
+            };
+            say "[$proc] stdout: $stdout";
         }
     }
+    say STDERR "[$proc] waiting for bg";
+    for(@bg_jobs){
+        finish $_ or croak "Uh oh. $!";
+    }
+    say STDERR "[$proc] exiting";
+    sleep 100;
 }
 
+$ENV{DISPLAY}=':0'; # TODO: hack for now
 # read YAML program
 my %program = %{YAML::XS::LoadFile $ARGV[0]};
 # require 'main' top level key
@@ -127,6 +148,9 @@ for(@main){
                 else{
                     croak "fork failed. $!";
                 }
+            }
+            for(map {$child_pids{$_}} keys %child_pids){
+                waitpid $_, 0;
             }
         }
         else{
