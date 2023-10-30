@@ -1,0 +1,22 @@
+main:
+  - "@arg 0 $pdf"
+  - "@arg 1 $text_file"
+  - Xvfb: :0
+    evince: $pdf
+    gvim: $text_file
+    xdotool:
+Xvfb:
+  - "@arg 0 $display"
+  - "Xvfb $display"
+evince:
+  - "@arg 0 $pdf"
+  - evince $pdf
+gvim:
+  - "@arg 0 $text_file"
+  - gvim $text_file
+xdotool:
+  - "@wait Xvfb"
+  - "@wait evince"
+  - "@wait gvim"
+  - xdotool search evince
+  - xdotool windowfocus
