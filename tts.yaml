@@ -7,13 +7,16 @@ main:
     xdotool:
 Xvfb:
   - "@arg 0 $display"
-  - "Xvfb $display"
+  - "@& Xvfb $display"
+  - "@done"
 evince:
   - "@arg 0 $pdf"
-  - evince $pdf
+  - "@& evince $pdf"
+  - "@done"
 gvim:
   - "@arg 0 $text_file"
-  - gvim $text_file
+  - "@& gvim $text_file"
+  - "@done"
 xdotool:
   - "@wait Xvfb"
   - "@wait evince"

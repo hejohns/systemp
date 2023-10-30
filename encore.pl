@@ -24,7 +24,7 @@ use diagnostics -verbose;
     use Capture::Tiny qw(:all);
     # for more complicated stuff
     # eg timeout, redirection
-    use IPC::Run qw(run);
+    use IPC::Run qw(start pump finish);
     use IPC::Cmd qw(can_run);
 # option/arg handling
     use Getopt::Long qw(:config gnu_getopt auto_version); # auto_help not the greatest
@@ -42,18 +42,52 @@ use diagnostics -verbose;
 
     our $VERSION = version->declare('v2023.10.29');
 # end prelude
-use Data::Dumper;
+use IPC::SysV qw(IPC_PRIVATE S_IRUSR S_IWUSR IPC_CREAT);
+use IPC::Semaphore;
+
+# semaphores
+our %sem;
 
 sub subst($env, @xs){
     @xs = grep defined, @xs;
     return map {
-        $_ =~ s/\$(\S+)/$env->{$1}/;
-        $_
+        s/\$(\S+)/$env->{$1}/; $_
     } @xs;
 }
 sub proc_eval($proc, $args, @program){
     my @args = grep defined, @$args;
     say "$proc: @args";
+    my %env;
+    my @bg_jobs;
+    # a proc should be a list of commands
+    for(@program){
+        if(m/^\@arg\s+(\d+)\s+\$(\S+)$/){
+            $env{$2} = $args[$1];
+            next;
+        }
+        s/\$(\S+)/$env{$1}/;
+        if(m/^\@wait\s+(\S+)$/){
+            say "$proc: FOO";
+            $sem{$1}->op(0, -1, 0);
+            say "$proc: BAR";
+        }
+        elsif(m/^\@done$/){
+            $sem{$proc}->op(0, 1, 0);
+        }
+        elsif(m/^\@&/){
+            say STDERR split '';
+            my $in;
+            my $out;
+            #my $harness = start [split ' '], \$in, \$out:
+            #pump $harness until length $out;
+            #push @bg_jobs, $harness;
+            #finish $harness or croak "Uh oh. $!";
+        }
+        else{
+            say STDERR split '';
+            #run [split ' '];
+        }
+    }
 }
 
 # read YAML program
@@ -65,18 +99,22 @@ delete $program{main};
 my %env;
 # main should be a sequence of commands, then a key-value describing the procs and their arguments
 # NOTE: for now, we assume the sequence of commands are just "@arg n $var" builtins
-for my $line (@main){
-    if(defined(reftype $line)){ # must be procs and args
-        if(reftype $line eq 'HASH'){
+for(@main){
+    if(defined(reftype $_)){ # must be procs and args
+        if(reftype $_ eq 'HASH'){
             say STDERR "starting main with %env:";
             say STDERR YAML::XS::Dump(\%env) . '...';
-            my %exec = %{$line};
-            my @child_pids;
+            my %exec = %$_;
+            my %child_pids;
+            for my $proc (keys %exec){
+                $sem{$proc} = IPC::Semaphore->new(IPC_PRIVATE, 1, S_IRUSR | S_IWUSR | IPC_CREAT);
+                $sem{$proc}->setval(0, 0);
+            }
             for my $proc (keys %exec){
                 my $pid = fork;
                 if(defined $pid){
                     if($pid){ # parent
-                        push @child_pids, $pid;
+                        $child_pids{$proc} = $pid;
                         next;
                     }
                     else{ # child
@@ -95,12 +133,12 @@ for my $line (@main){
             croak "main should be a hash of procs";
         }
     }
-    elsif($line =~ m/^\@arg\s+(\d+)\s+\$(\S+)$/){ # else @arg builtin
+    elsif(m/^\@arg\s+(\d+)\s+\$(\S+)$/){ # else @arg builtin
         say STDERR "$ARGV[1 + $1] -> \$$2";
         $env{$2} = $ARGV[1 + $1];
     }
     else{
-        croak "main is malformed at line: $line";
+        croak "main is malformed at line: $_";
     }
 }
 # return EXIT_SUCCESS
